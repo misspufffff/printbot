@@ -261,6 +261,29 @@ if (env.NODE_ENV === 'development') {
       res.status(500).json({ status: 'error', message: error.message })
     }
   })
+
+  receiver.router.get('/diag/print-requests', async (_req, res) => {
+    try {
+      const pendingPrintRequests = global.pendingPrintRequests || new Map()
+      const requests = Array.from(pendingPrintRequests.entries()).map(([id, request]) => ({
+        id,
+        ...request,
+        submittedAt: new Date(request.submittedAt).toISOString(),
+        completedAt: request.completedAt ? new Date(request.completedAt).toISOString() : null
+      }))
+      
+      res.status(200).json({ 
+        status: 'success', 
+        requests,
+        count: requests.length,
+        pending: requests.filter(r => r.status === 'pending_file_upload').length,
+        completed: requests.filter(r => r.status === 'completed').length
+      })
+    } catch (error) {
+      logger.error('Print requests diagnostic failed', { error: error.message })
+      res.status(500).json({ status: 'error', message: error.message })
+    }
+  })
 }
 
 // Slash command handler
@@ -325,7 +348,7 @@ app.event('file_shared', async ({ event, client }) => {
     let printRequestId = null
     
     for (const [id, request] of pendingPrintRequests.entries()) {
-      if (request.user_id === user && Date.now() < request.expiresAt) {
+      if (request.user_id === user && request.status === 'pending_file_upload') {
         printRequest = request
         printRequestId = id
         break
@@ -340,8 +363,14 @@ app.event('file_shared', async ({ event, client }) => {
         text: 'Got it — processing your print request with the uploaded file…'
       })
       
-      // Remove from pending requests
-      global.pendingPrintRequests.delete(printRequestId)
+      // Update status to completed instead of removing
+      global.pendingPrintRequests.set(printRequestId, {
+        ...printRequest,
+        status: 'completed',
+        completedAt: Date.now(),
+        fileId: file.id,
+        fileName: file.name
+      })
       
       // Process the complete print request
       await processPrintRequest({
@@ -543,23 +572,18 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
       materials,
       notes,
       submittedAt: Date.now(),
-      expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
+      status: 'pending_file_upload'
     }
     
-    // Store in global pending requests
+    // Store in global pending requests (no expiration)
     global.pendingPrintRequests = global.pendingPrintRequests || new Map()
     global.pendingPrintRequests.set(printRequestId, printRequest)
-    
-    // Set expiration cleanup
-    setTimeout(() => {
-      global.pendingPrintRequests?.delete(printRequestId)
-    }, 5 * 60 * 1000)
     
     // Send confirmation message
     await client.chat.postEphemeral({
       channel: body.user.id,
       user: body.user.id,
-      text: `✅ Print request submitted!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• Notes: ${notes || 'None'}\n\n📁 **Please upload your 3D model file in this channel within the next 5 minutes to complete your print request.**`
+      text: `✅ Print request submitted!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• Notes: ${notes || 'None'}\n\n📁 **Please upload your 3D model file in this channel to complete your print request.**`
     })
     
   } catch (error) {
@@ -862,7 +886,7 @@ async function processFile({ client, file, channel_id, user_id, respond }) {
   }
 }
 
-// Cleanup expired waitlist entries and print requests
+// Cleanup expired waitlist entries (print requests are kept permanently)
 setInterval(() => {
   const now = Date.now()
   let cleaned = 0
@@ -875,17 +899,8 @@ setInterval(() => {
     }
   }
   
-  // Clean up expired print requests
-  const pendingPrintRequests = global.pendingPrintRequests || new Map()
-  for (const [id, request] of pendingPrintRequests.entries()) {
-    if (request.expiresAt < now) {
-      pendingPrintRequests.delete(id)
-      cleaned++
-    }
-  }
-  
   if (cleaned > 0) {
-    logger.debug('Cleaned expired entries', { count: cleaned })
+    logger.debug('Cleaned expired waitlist entries', { count: cleaned })
   }
 }, 60 * 1000) // Run every minute
 
