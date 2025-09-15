@@ -46,8 +46,8 @@ const keyFor = (channel, user) => `${channel}:${user}`
 // Show interactive print modal
 async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
   try {
-    // Get projects, printers, and materials in parallel with timeout
-    const [projects, printers, materials] = await Promise.allSettled([
+    // Get projects and printers in parallel with timeout
+    const [projects, printers] = await Promise.allSettled([
       Promise.race([
         googleService.getProjects(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Projects fetch timeout')), 10000))
@@ -55,10 +55,6 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
       Promise.race([
         googleService.getPrinters(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Printers fetch timeout')), 5000))
-      ]),
-      Promise.race([
-        googleService.getMaterials(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Materials fetch timeout')), 5000))
       ])
     ])
 
@@ -136,8 +132,10 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
         }))
       : [{ text: { type: 'plain_text', text: 'No printers available' }, value: 'none' }]
 
-    const materialOptions = materials.status === 'fulfilled' && materials.value.length > 0
-      ? materials.value.map(material => ({
+    // Get default materials (will be updated dynamically based on printer selection)
+    const defaultMaterials = await googleService.getMaterials()
+    const materialOptions = defaultMaterials.length > 0
+      ? defaultMaterials.map(material => ({
           text: { type: 'plain_text', text: material },
           value: material
         }))
@@ -286,6 +284,23 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
               },
               options: materialOptions
             }
+          },
+          {
+            type: 'input',
+            block_id: 'other_material_section',
+            element: {
+              type: 'plain_text_input',
+              action_id: 'other_material_input',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Enter custom material name...'
+              }
+            },
+            label: {
+              type: 'plain_text',
+              text: 'Custom Material (if "Other" selected):'
+            },
+            optional: true
           },
           {
             type: 'input',
@@ -586,6 +601,61 @@ app.action('select_project', async ({ ack, body, client, respond }) => {
   // This is handled by the form submission, no immediate response needed
 })
 
+// Handle printer selection (for dynamic materials update)
+app.action('select_printer', async ({ ack, body, client, respond }) => {
+  await ack()
+  
+  try {
+    const selectedPrinter = body.actions[0].selected_option?.value
+    if (!selectedPrinter || selectedPrinter === 'none') return
+    
+    // Get materials for the selected printer
+    const materials = await googleService.getMaterials(selectedPrinter)
+    const materialOptions = materials.map(material => ({
+      text: { type: 'plain_text', text: material },
+      value: material
+    }))
+    
+    // Update the materials dropdown
+    await client.views.update({
+      view_id: body.view.id,
+      view: {
+        type: 'modal',
+        callback_id: 'print_request_modal',
+        title: {
+          type: 'plain_text',
+          text: 'Print Request'
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Submit Print Request'
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancel'
+        },
+        blocks: body.view.blocks.map(block => {
+          if (block.block_id === 'materials_section') {
+            return {
+              ...block,
+              accessory: {
+                ...block.accessory,
+                options: materialOptions
+              }
+            }
+          }
+          return block
+        })
+      }
+    })
+  } catch (error) {
+    logger.error('Failed to update materials for printer', { 
+      error: error.message,
+      printer: body.actions[0].selected_option?.value
+    })
+  }
+})
+
 // Handle notes input (for form updates)
 app.action('add_notes', async ({ ack, body, client, respond }) => {
   await ack()
@@ -701,13 +771,20 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
     
     const printer = values.printer_section?.select_printer?.selected_option?.value
     const materials = values.materials_section?.select_materials?.selected_option?.value
+    const customMaterial = values.other_material_section?.other_material_input?.value || ''
     const notes = values.notes_section?.add_notes?.value || ''
+    
+    // Use custom material if "Other" is selected and custom material is provided
+    const finalMaterial = materials === 'Other' && customMaterial.trim() 
+      ? customMaterial.trim() 
+      : materials
     
     logger.info('Print request modal submitted', { 
       user_id,
       project,
       printer,
-      materials,
+      materials: finalMaterial,
+      customMaterial,
       hasNotes: !!notes
     })
     
@@ -728,10 +805,18 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
       return
     }
     
-    if (!materials || materials === 'none') {
+    if (!finalMaterial || finalMaterial === 'none') {
       await client.chat.postMessage({
         channel: body.user.id,
         text: '❌ Please select materials before submitting.'
+      })
+      return
+    }
+    
+    if (materials === 'Other' && !customMaterial.trim()) {
+      await client.chat.postMessage({
+        channel: body.user.id,
+        text: '❌ Please specify the custom material name when "Other" is selected.'
       })
       return
     }
@@ -750,7 +835,7 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
       user_id,
       project,
       printer,
-      materials,
+      materials: finalMaterial,
       notes,
       submittedAt: Date.now(),
       status: 'pending_file_upload'
@@ -763,7 +848,7 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
     // Send confirmation message in channel
     await client.chat.postMessage({
       channel: body.user.id,
-      text: `✅ Print request submitted!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• Notes: ${notes}\n\n📁 **Please upload your 3D model file in this channel to complete your print request.**`
+      text: `✅ Print request submitted!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${finalMaterial}*\n• Notes: ${notes}\n\n📁 **Please upload your 3D model file in this channel to complete your print request.**`
     })
     
   } catch (error) {

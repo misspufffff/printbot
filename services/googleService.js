@@ -199,10 +199,8 @@ class GoogleService {
     try {
       // Return the specific 3D printers available
       const printers = [
-        'Form Labs Big',
-        'Form Labs Small', 
-        'Bambu 1',
-        'Bambu 2'
+        'Bambu',
+        'Formlabs Form 3'
       ]
       
       logger.info('Printers loaded successfully', { 
@@ -216,27 +214,54 @@ class GoogleService {
       })
       // Return default printers if there's an error
       return [
-        'Form Labs Big',
-        'Form Labs Small', 
-        'Bambu 1',
-        'Bambu 2'
+        'Bambu',
+        'Formlabs Form 3'
       ]
     }
   }
 
-  // Get available materials
-  async getMaterials() {
+  // Get available materials based on printer
+  async getMaterials(printer = null) {
     try {
-      // Return the specific 3D printing materials available
-      const materials = [
-        'PLA',
-        'PETG',
-        'HDPE'
-      ]
+      let materials = []
+      
+      if (printer === 'Bambu') {
+        materials = [
+          'PLA',
+          'ABS',
+          'ASA',
+          'Other'
+        ]
+      } else if (printer === 'Formlabs Form 3') {
+        materials = [
+          'Tough 1500',
+          'Tough 2000',
+          'Durable',
+          'White',
+          'Clear',
+          'Elastic 80A',
+          'Other'
+        ]
+      } else {
+        // Default materials for both printers
+        materials = [
+          'PLA',
+          'ABS',
+          'ASA',
+          'Tough 1500',
+          'Tough 2000',
+          'Durable',
+          'White',
+          'Clear',
+          'Elastic 80A',
+          'Other'
+        ]
+      }
       
       logger.info('Materials loaded successfully', { 
         count: materials.length,
-        materials
+        materials,
+        printer
       })
       return materials
     } catch (error) {
@@ -246,8 +271,15 @@ class GoogleService {
       // Return default materials if there's an error
       return [
         'PLA',
-        'PETG',
-        'HDPE'
+        'ABS',
+        'ASA',
+        'Tough 1500',
+        'Tough 2000',
+        'Durable',
+        'White',
+        'Clear',
+        'Elastic 80A',
+        'Other'
       ]
     }
   }
