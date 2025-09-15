@@ -14,28 +14,46 @@ class GoogleService {
   async initializeAuth() {
     if (this.auth) return this.auth
 
-    const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS
-    if (!keyFile) {
-      throw new Error('GOOGLE_APPLICATION_CREDENTIALS not set in environment')
-    }
-    
-    if (!fs.existsSync(keyFile)) {
-      throw new Error(`Service account key file not found at: ${keyFile}`)
-    }
+    // Try environment variable first (for Render deployment)
+    if (process.env.GOOGLE_CREDENTIALS_JSON) {
+      try {
+        const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON)
+        this.auth = new google.auth.GoogleAuth({
+          credentials,
+          scopes: [
+            'https://www.googleapis.com/auth/drive',
+            'https://www.googleapis.com/auth/spreadsheets',
+          ],
+        })
+        logger.info('Google authentication initialized from environment variable')
+      } catch (error) {
+        throw new Error(`Invalid GOOGLE_CREDENTIALS_JSON: ${error.message}`)
+      }
+    } else {
+      // Fallback to file-based authentication (for local development)
+      const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS
+      if (!keyFile) {
+        throw new Error('Either GOOGLE_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS must be set')
+      }
+      
+      if (!fs.existsSync(keyFile)) {
+        throw new Error(`Service account key file not found at: ${keyFile}`)
+      }
 
-    this.auth = new google.auth.GoogleAuth({
-      keyFile,
-      scopes: [
-        'https://www.googleapis.com/auth/drive',
-        'https://www.googleapis.com/auth/spreadsheets',
-      ],
-    })
+      this.auth = new google.auth.GoogleAuth({
+        keyFile,
+        scopes: [
+          'https://www.googleapis.com/auth/drive',
+          'https://www.googleapis.com/auth/spreadsheets',
+        ],
+      })
+      logger.info('Google authentication initialized from file')
+    }
 
     // Initialize API clients
     this.drive = google.drive({ version: 'v3', auth: this.auth })
     this.sheets = google.sheets({ version: 'v4', auth: this.auth })
 
-    logger.info('Google authentication initialized')
     return this.auth
   }
 
