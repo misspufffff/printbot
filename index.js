@@ -51,21 +51,21 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
     ])
 
     const projectOptions = projects.status === 'fulfilled' && projects.value.length > 0
-      ? projects.value.slice(0, 100).map(project => ({
+      ? projects.value.map(project => ({
           text: { type: 'plain_text', text: project },
           value: project
         }))
       : [{ text: { type: 'plain_text', text: 'No projects available' }, value: 'none' }]
 
     const printerOptions = printers.status === 'fulfilled' && printers.value.length > 0
-      ? printers.value.slice(0, 100).map(printer => ({
+      ? printers.value.map(printer => ({
           text: { type: 'plain_text', text: printer },
           value: printer
         }))
       : [{ text: { type: 'plain_text', text: 'No printers available' }, value: 'none' }]
 
     const materialOptions = materials.status === 'fulfilled' && materials.value.length > 0
-      ? materials.value.slice(0, 100).map(material => ({
+      ? materials.value.map(material => ({
           text: { type: 'plain_text', text: material },
           value: material
         }))
@@ -164,9 +164,8 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
             },
             label: {
               type: 'plain_text',
-              text: 'Add Notes (optional):'
-            },
-            optional: true
+              text: 'Add Notes:'
+            }
           },
           {
             type: 'section',
@@ -357,9 +356,8 @@ app.event('file_shared', async ({ event, client }) => {
     
     if (printRequest) {
       // Process print request with file
-      await client.chat.postEphemeral({
+      await client.chat.postMessage({
         channel,
-        user,
         text: 'Got it — processing your print request with the uploaded file…'
       })
       
@@ -555,10 +553,33 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
     
     // Validate required fields
     if (!project || project === 'none') {
-      await client.chat.postEphemeral({
+      await client.chat.postMessage({
         channel: body.user.id,
-        user: body.user.id,
         text: '❌ Please select a project before submitting.'
+      })
+      return
+    }
+    
+    if (!printer || printer === 'none') {
+      await client.chat.postMessage({
+        channel: body.user.id,
+        text: '❌ Please select a printer before submitting.'
+      })
+      return
+    }
+    
+    if (!materials || materials === 'none') {
+      await client.chat.postMessage({
+        channel: body.user.id,
+        text: '❌ Please select materials before submitting.'
+      })
+      return
+    }
+    
+    if (!notes || notes.trim().length === 0) {
+      await client.chat.postMessage({
+        channel: body.user.id,
+        text: '❌ Please add notes before submitting.'
       })
       return
     }
@@ -579,11 +600,10 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
     global.pendingPrintRequests = global.pendingPrintRequests || new Map()
     global.pendingPrintRequests.set(printRequestId, printRequest)
     
-    // Send confirmation message
-    await client.chat.postEphemeral({
+    // Send confirmation message in channel
+    await client.chat.postMessage({
       channel: body.user.id,
-      user: body.user.id,
-      text: `✅ Print request submitted!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• Notes: ${notes || 'None'}\n\n📁 **Please upload your 3D model file in this channel to complete your print request.**`
+      text: `✅ Print request submitted!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• Notes: ${notes}\n\n📁 **Please upload your 3D model file in this channel to complete your print request.**`
     })
     
   } catch (error) {
@@ -591,9 +611,8 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
       error: error.message, 
       user: body.user.id 
     })
-    await client.chat.postEphemeral({
+    await client.chat.postMessage({
       channel: body.user.id,
-      user: body.user.id,
       text: `❌ Error processing print request: ${error.message}`
     })
   }
@@ -664,11 +683,10 @@ async function processPrintRequest({ client, file, user_id, project, printer, ma
       materials
     })
 
-    // 5) Send success response
-    await client.chat.postEphemeral({
+    // 5) Send success response in channel
+    await client.chat.postMessage({
       channel: user_id,
-      user: user_id,
-      text: `✅ Print request submitted successfully!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• File: *${file.name}*\n• Drive: ${driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`}\n• Notes: ${notes || 'None'}\n• Processing time: ${totalTime}ms`
+      text: `✅ Print request submitted successfully!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• File: *${file.name}*\n• Drive: ${driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`}\n• Notes: ${notes}\n• Processing time: ${totalTime}ms`
     })
 
   } catch (error) {
@@ -682,9 +700,8 @@ async function processPrintRequest({ client, file, user_id, project, printer, ma
       processingTime: Date.now() - startTime
     })
 
-    await client.chat.postEphemeral({
+    await client.chat.postMessage({
       channel: user_id,
-      user: user_id,
       text: `❌ Print request failed: ${error.message}`,
     })
   }
