@@ -194,51 +194,32 @@ class GoogleService {
     }
   }
 
-  // Fetch printers from the projects sheet
+  // Get available printers
   async getPrinters() {
     try {
-      await this.initializeAuth()
+      // Return the specific 3D printers available
+      const printers = [
+        'Form Labs Big',
+        'Form Labs Small', 
+        'Bambu 1',
+        'Bambu 2'
+      ]
       
-      const range = 'Project Tracker!B:B' // Printer names in column B of Project Tracker tab
-      const projectSheetId = process.env.PROJECT_SHEET || '1DhPrekXEd0GG45SpNftVbjKeHg52Jwec-_rQ9qX3Bz0'
-      const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: projectSheetId,
-        range
-      })
-      
-      const printers = response.data.values
-        ?.filter(row => row[0] && row[0].trim()) // Filter out empty rows
-        ?.map(row => row[0].trim()) || []
-      
-      // If no printers found in sheet, return default options
-      if (printers.length === 0) {
-        return [
-          'Printer 1 (Default)',
-          'Printer 2 (High Quality)',
-          'Printer 3 (Large Format)',
-          'Printer 4 (Color)',
-          'Printer 5 (Black & White)'
-        ]
-      }
-      
-      logger.info('Printers fetched successfully', { 
+      logger.info('Printers loaded successfully', { 
         count: printers.length,
-        sheetId: projectSheetId,
-        range: 'Project Tracker!B:B'
+        printers
       })
       return printers
     } catch (error) {
-      logger.error('Failed to fetch printers', { 
-        error: error.message,
-        sheetId: projectSheetId
+      logger.error('Failed to load printers', { 
+        error: error.message
       })
-      // Return default printers if sheet access fails
+      // Return default printers if there's an error
       return [
-        'Printer 1 (Default)',
-        'Printer 2 (High Quality)',
-        'Printer 3 (Large Format)',
-        'Printer 4 (Color)',
-        'Printer 5 (Black & White)'
+        'Form Labs Big',
+        'Form Labs Small', 
+        'Bambu 1',
+        'Bambu 2'
       ]
     }
   }
