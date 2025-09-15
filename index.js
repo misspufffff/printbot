@@ -169,19 +169,10 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
             optional: true
           },
           {
-            type: 'input',
-            block_id: 'file_section',
-            element: {
-              type: 'plain_text_input',
-              action_id: 'file_input',
-              placeholder: {
-                type: 'plain_text',
-                text: 'Paste file URL or Slack file ID here...'
-              }
-            },
-            label: {
-              type: 'plain_text',
-              text: 'File URL or ID:'
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*📁 File Upload:*\nAfter submitting this form, please upload your 3D model file directly in this channel. The bot will automatically process it and link it to your print request.'
             }
           }
         ]
@@ -327,6 +318,45 @@ app.event('file_shared', async ({ event, client }) => {
     if (!channel) return
 
     const user = file.user || event.user_id
+    
+    // Check for pending print requests first
+    const pendingPrintRequests = global.pendingPrintRequests || new Map()
+    let printRequest = null
+    let printRequestId = null
+    
+    for (const [id, request] of pendingPrintRequests.entries()) {
+      if (request.user_id === user && Date.now() < request.expiresAt) {
+        printRequest = request
+        printRequestId = id
+        break
+      }
+    }
+    
+    if (printRequest) {
+      // Process print request with file
+      await client.chat.postEphemeral({
+        channel,
+        user,
+        text: 'Got it — processing your print request with the uploaded file…'
+      })
+      
+      // Remove from pending requests
+      global.pendingPrintRequests.delete(printRequestId)
+      
+      // Process the complete print request
+      await processPrintRequest({
+        client,
+        file,
+        user_id: user,
+        project: printRequest.project,
+        printer: printRequest.printer,
+        materials: printRequest.materials,
+        notes: printRequest.notes
+      })
+      return
+    }
+    
+    // Fallback to old file upload logic
     const key = keyFor(channel, user)
     const wait = waiting.get(key)
     
@@ -485,15 +515,13 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
     const printer = values.printer_section?.select_printer?.selected_option?.value
     const materials = values.materials_section?.select_materials?.selected_option?.value
     const notes = values.notes_section?.add_notes?.value || ''
-    const fileInput = values.file_section?.file_input?.value || ''
     
     logger.info('Print request modal submitted', { 
       user_id,
       project,
       printer,
       materials,
-      hasNotes: !!notes,
-      hasFileInput: !!fileInput
+      hasNotes: !!notes
     })
     
     // Validate required fields
@@ -506,45 +534,33 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
       return
     }
     
-    if (!fileInput.trim()) {
-      await client.chat.postEphemeral({
-        channel: body.user.id,
-        user: body.user.id,
-        text: '❌ Please provide a file URL or Slack file ID.'
-      })
-      return
+    // Store the print request details for file upload
+    const printRequestId = `print_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const printRequest = {
+      user_id,
+      project,
+      printer,
+      materials,
+      notes,
+      submittedAt: Date.now(),
+      expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
     }
     
-    // Process the file
+    // Store in global pending requests
+    global.pendingPrintRequests = global.pendingPrintRequests || new Map()
+    global.pendingPrintRequests.set(printRequestId, printRequest)
+    
+    // Set expiration cleanup
+    setTimeout(() => {
+      global.pendingPrintRequests?.delete(printRequestId)
+    }, 5 * 60 * 1000)
+    
+    // Send confirmation message
     await client.chat.postEphemeral({
       channel: body.user.id,
       user: body.user.id,
-      text: 'Processing your print request...'
+      text: `✅ Print request submitted!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• Notes: ${notes || 'None'}\n\n📁 **Please upload your 3D model file in this channel within the next 5 minutes to complete your print request.**`
     })
-    
-    try {
-      const file = await slackService.processFileInput(client, fileInput.trim())
-      await processPrintRequest({ 
-        client, 
-        file, 
-        user_id, 
-        project, 
-        printer, 
-        materials, 
-        notes 
-      })
-    } catch (fileError) {
-      logger.error('File processing failed in modal', { 
-        error: fileError.message, 
-        user_id, 
-        fileInput 
-      })
-      await client.chat.postEphemeral({
-        channel: body.user.id,
-        user: body.user.id,
-        text: `❌ Could not process file: ${fileError.message}`
-      })
-    }
     
   } catch (error) {
     logger.error('Print request modal submission failed', { 
@@ -846,11 +862,12 @@ async function processFile({ client, file, channel_id, user_id, respond }) {
   }
 }
 
-// Cleanup expired waitlist entries
+// Cleanup expired waitlist entries and print requests
 setInterval(() => {
   const now = Date.now()
   let cleaned = 0
   
+  // Clean up expired waitlist entries
   for (const [key, value] of waiting.entries()) {
     if (value.expiresAt < now) {
       waiting.delete(key)
@@ -858,8 +875,17 @@ setInterval(() => {
     }
   }
   
+  // Clean up expired print requests
+  const pendingPrintRequests = global.pendingPrintRequests || new Map()
+  for (const [id, request] of pendingPrintRequests.entries()) {
+    if (request.expiresAt < now) {
+      pendingPrintRequests.delete(id)
+      cleaned++
+    }
+  }
+  
   if (cleaned > 0) {
-    logger.debug('Cleaned expired waitlist entries', { count: cleaned })
+    logger.debug('Cleaned expired entries', { count: cleaned })
   }
 }, 60 * 1000) // Run every minute
 
