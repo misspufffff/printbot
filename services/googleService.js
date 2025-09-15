@@ -224,57 +224,30 @@ class GoogleService {
     }
   }
 
-  // Fetch materials from the projects sheet
+  // Get available materials
   async getMaterials() {
     try {
-      await this.initializeAuth()
+      // Return the specific 3D printing materials available
+      const materials = [
+        'PLA',
+        'PETG',
+        'HDPE'
+      ]
       
-      const range = 'Project Tracker!C:C' // Material names in column C of Project Tracker tab
-      const projectSheetId = process.env.PROJECT_SHEET || '1DhPrekXEd0GG45SpNftVbjKeHg52Jwec-_rQ9qX3Bz0'
-      const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: projectSheetId,
-        range
-      })
-      
-      const materials = response.data.values
-        ?.filter(row => row[0] && row[0].trim()) // Filter out empty rows
-        ?.map(row => row[0].trim()) || []
-      
-      // If no materials found in sheet, return default options
-      if (materials.length === 0) {
-        return [
-          'PLA (Standard)',
-          'PLA+ (Enhanced)',
-          'PETG (Durable)',
-          'ABS (Heat Resistant)',
-          'TPU (Flexible)',
-          'Wood Fill',
-          'Metal Fill',
-          'Carbon Fiber'
-        ]
-      }
-      
-      logger.info('Materials fetched successfully', { 
+      logger.info('Materials loaded successfully', { 
         count: materials.length,
-        sheetId: projectSheetId,
-        range: 'Project Tracker!C:C'
+        materials
       })
       return materials
     } catch (error) {
-      logger.error('Failed to fetch materials', { 
-        error: error.message,
-        sheetId: projectSheetId
+      logger.error('Failed to load materials', { 
+        error: error.message
       })
-      // Return default materials if sheet access fails
+      // Return default materials if there's an error
       return [
-        'PLA (Standard)',
-        'PLA+ (Enhanced)',
-        'PETG (Durable)',
-        'ABS (Heat Resistant)',
-        'TPU (Flexible)',
-        'Wood Fill',
-        'Metal Fill',
-        'Carbon Fiber'
+        'PLA',
+        'PETG',
+        'HDPE'
       ]
     }
   }
