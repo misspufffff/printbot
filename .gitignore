@@ -3,4 +3,5 @@ logs/
 config/secrets/
 *.log
 .env
+.env.save
 .DS_Store
