@@ -2,6 +2,10 @@
 
 A secure, high-performance Slack bot that automatically uploads files to Google Drive and logs them in Google Sheets.
 
+[![GitHub](https://img.shields.io/github/license/misspufffff/printbot)](https://github.com/misspufffff/printbot)
+[![GitHub](https://img.shields.io/github/stars/misspufffff/printbot)](https://github.com/misspufffff/printbot)
+[![GitHub](https://img.shields.io/github/issues/misspufffff/printbot)](https://github.com/misspufffff/printbot/issues)
+
 ## Features
 
 - 🔒 **Security First**: Input validation, rate limiting, security headers
@@ -211,6 +215,12 @@ Set `LOG_LEVEL=debug` in your `.env` file for detailed logging.
 4. Add tests if applicable
 5. Submit a pull request
 
+## Links
+
+- **Repository**: [https://github.com/misspufffff/printbot](https://github.com/misspufffff/printbot)
+- **Issues**: [https://github.com/misspufffff/printbot/issues](https://github.com/misspufffff/printbot/issues)
+- **Releases**: [https://github.com/misspufffff/printbot/releases](https://github.com/misspufffff/printbot/releases)
+
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - see [LICENSE](https://github.com/misspufffff/printbot/blob/main/LICENSE) file for details.

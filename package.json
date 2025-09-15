@@ -30,6 +30,14 @@
     "google-sheets",
     "file-upload"
   ],
-  "author": "Your Name",
-  "license": "MIT"
+  "author": "maddyclaypoole",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/misspufffff/printbot.git"
+  },
+  "homepage": "https://github.com/misspufffff/printbot#readme",
+  "bugs": {
+    "url": "https://github.com/misspufffff/printbot/issues"
+  }
 }
