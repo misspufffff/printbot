@@ -51,21 +51,21 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
     ])
 
     const projectOptions = projects.status === 'fulfilled' && projects.value.length > 0
-      ? projects.value.map(project => ({
+      ? projects.value.slice(0, 100).map(project => ({
           text: { type: 'plain_text', text: project },
           value: project
         }))
       : [{ text: { type: 'plain_text', text: 'No projects available' }, value: 'none' }]
 
     const printerOptions = printers.status === 'fulfilled' && printers.value.length > 0
-      ? printers.value.map(printer => ({
+      ? printers.value.slice(0, 100).map(printer => ({
           text: { type: 'plain_text', text: printer },
           value: printer
         }))
       : [{ text: { type: 'plain_text', text: 'No printers available' }, value: 'none' }]
 
     const materialOptions = materials.status === 'fulfilled' && materials.value.length > 0
-      ? materials.value.map(material => ({
+      ? materials.value.slice(0, 100).map(material => ({
           text: { type: 'plain_text', text: material },
           value: material
         }))
