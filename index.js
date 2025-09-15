@@ -74,8 +74,8 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
       const dropdownNumber = Math.floor(i / itemsPerDropdown) + 1
       
       const projectOptions = projectBatch.map((project, index) => {
-        // Ensure both display text and value are within Slack's character limit (using 70 for safety buffer)
-        const maxLength = 70
+        // Ensure both display text and value are within Slack's character limit (using 65 for extra safety buffer)
+        const maxLength = 65
         const truncatedProject = project.length > maxLength ? project.substring(0, maxLength - 3) + '...' : project
         const truncatedValue = project.length > maxLength ? project.substring(0, maxLength - 3) + '...' : project
         
@@ -160,11 +160,42 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
       return text
     }
 
-    // Validate all dropdown options
+    // Validate all dropdown options and log details for debugging
     projectDropdowns.forEach((dropdown, dropdownIndex) => {
+      logger.info(`Processing dropdown ${dropdownIndex + 1} with ${dropdown.options.length} options`)
+      
       dropdown.options.forEach((option, optionIndex) => {
+        const originalText = option.text.text
+        const originalValue = option.value
+        
         option.text.text = validateTextLength(option.text.text, `dropdown_${dropdownIndex}_option_${optionIndex}_text`)
         option.value = validateTextLength(option.value, `dropdown_${dropdownIndex}_option_${optionIndex}_value`)
+        
+        // Log details for the 3rd dropdown, 30th option (where error occurs)
+        if (dropdownIndex === 2 && optionIndex === 29) {
+          logger.error('PROBLEMATIC OPTION FOUND', {
+            dropdownIndex: dropdownIndex + 1,
+            optionIndex: optionIndex + 1,
+            originalText,
+            originalValue,
+            finalText: option.text.text,
+            finalValue: option.value,
+            textLength: option.text.text.length,
+            valueLength: option.value.length
+          })
+        }
+        
+        // Log any option that still exceeds limits
+        if (option.text.text.length > 75 || option.value.length > 75) {
+          logger.error('Option still exceeds limits after validation', {
+            dropdownIndex: dropdownIndex + 1,
+            optionIndex: optionIndex + 1,
+            text: option.text.text,
+            value: option.value,
+            textLength: option.text.text.length,
+            valueLength: option.value.length
+          })
+        }
       })
     })
 
