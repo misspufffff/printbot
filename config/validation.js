@@ -6,10 +6,20 @@ export const envSchema = Joi.object({
   SLACK_SIGNING_SECRET: Joi.string().min(1).required(),
   SHEET_ID: Joi.string().min(1).required(),
   DRIVE_FOLDER_ID: Joi.string().min(1).required(),
-  GOOGLE_APPLICATION_CREDENTIALS: Joi.string().min(1).required(),
+  // Google authentication - either JSON env var or file path
+  GOOGLE_CREDENTIALS_JSON: Joi.string().min(1).optional(),
+  GOOGLE_APPLICATION_CREDENTIALS: Joi.string().min(1).optional(),
   PORT: Joi.number().port().default(3000),
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('production'),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info')
+}).custom((value, helpers) => {
+  // Custom validation: require either GOOGLE_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS
+  if (!value.GOOGLE_CREDENTIALS_JSON && !value.GOOGLE_APPLICATION_CREDENTIALS) {
+    return helpers.error('custom.googleAuthRequired')
+  }
+  return value
+}).messages({
+  'custom.googleAuthRequired': 'Either GOOGLE_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS must be provided'
 }).unknown(true) // Allow unknown environment variables
 
 // File validation schema
