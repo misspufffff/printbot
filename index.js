@@ -29,6 +29,9 @@ const receiver = new ExpressReceiver({
 receiver.router.use(compression())
 receiver.router.use(...securityMiddleware)
 
+// Trust proxy for rate limiting (fixes X-Forwarded-For header error)
+receiver.router.set('trust proxy', true)
+
 // Initialize Slack app
 const app = new App({
   token: env.SLACK_BOT_TOKEN,
@@ -43,55 +46,88 @@ const keyFor = (channel, user) => `${channel}:${user}`
 // Show interactive print modal
 async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
   try {
-    // Get projects, printers, and materials in parallel
+    // Get projects, printers, and materials in parallel with timeout
     const [projects, printers, materials] = await Promise.allSettled([
-      googleService.getProjects(),
-      googleService.getPrinters(),
-      googleService.getMaterials()
+      Promise.race([
+        googleService.getProjects(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Projects fetch timeout')), 10000))
+      ]),
+      Promise.race([
+        googleService.getPrinters(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Printers fetch timeout')), 5000))
+      ]),
+      Promise.race([
+        googleService.getMaterials(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Materials fetch timeout')), 5000))
+      ])
     ])
 
-    // Organize projects by first letter for better organization
+    // Get projects and create multiple dropdowns (100 items each)
     const allProjects = projects.status === 'fulfilled' ? projects.value : []
     
-    // Group projects by first letter
-    const projectsByLetter = {}
-    allProjects.forEach(project => {
-      const firstLetter = project.charAt(0).toUpperCase()
-      if (!projectsByLetter[firstLetter]) {
-        projectsByLetter[firstLetter] = []
-      }
-      projectsByLetter[firstLetter].push(project)
-    })
+    // Create project dropdowns with 100 items each
+    const projectDropdowns = []
+    const itemsPerDropdown = 100
     
-    // Create letter groups (A-F, G-M, N-S, T-Z) to fit within 100 items per group
-    const letterGroups = [
-      { letters: ['A', 'B', 'C', 'D', 'E', 'F'], label: 'A-F' },
-      { letters: ['G', 'H', 'I', 'J', 'K', 'L', 'M'], label: 'G-M' },
-      { letters: ['N', 'O', 'P', 'Q', 'R', 'S'], label: 'N-S' },
-      { letters: ['T', 'U', 'V', 'W', 'X', 'Y', 'Z'], label: 'T-Z' }
-    ]
-    
-    const projectDropdowns = letterGroups.map(group => {
-      const groupProjects = []
-      group.letters.forEach(letter => {
-        if (projectsByLetter[letter]) {
-          groupProjects.push(...projectsByLetter[letter])
+    for (let i = 0; i < allProjects.length; i += itemsPerDropdown) {
+      const projectBatch = allProjects.slice(i, i + itemsPerDropdown)
+      const dropdownNumber = Math.floor(i / itemsPerDropdown) + 1
+      
+      const projectOptions = projectBatch.map((project, index) => {
+        // Ensure both display text and value are within Slack's character limit (using 70 for safety buffer)
+        const maxLength = 70
+        const truncatedProject = project.length > maxLength ? project.substring(0, maxLength - 3) + '...' : project
+        const truncatedValue = project.length > maxLength ? project.substring(0, maxLength - 3) + '...' : project
+        
+        // Additional validation to ensure we don't exceed limits
+        const finalText = truncatedProject.length > maxLength ? truncatedProject.substring(0, maxLength) : truncatedProject
+        const finalValue = truncatedValue.length > maxLength ? truncatedValue.substring(0, maxLength) : truncatedValue
+        
+        // Debug logging for ALL projects in the 3rd dropdown (blocks/6)
+        if (dropdownNumber === 3) {
+          logger.info('Third dropdown project details', { 
+            original: project, 
+            finalText: finalText,
+            finalValue: finalValue,
+            textLength: finalText.length,
+            valueLength: finalValue.length,
+            optionIndex: index
+          })
+        }
+        
+        // Debug logging for long project names
+        if (project.length > maxLength) {
+          logger.info('Truncated long project name', { 
+            original: project, 
+            truncated: finalText,
+            length: project.length,
+            dropdownNumber,
+            optionIndex: index
+          })
+        }
+        
+        return {
+          text: { type: 'plain_text', text: finalText },
+          value: finalValue
         }
       })
       
-      return {
-        label: group.label,
-        options: groupProjects.slice(0, 100).map(project => ({
-          text: { type: 'plain_text', text: project },
-          value: project
-        }))
-      }
-    }).filter(group => group.options.length > 0)
+      const label = `Projects ${i + 1}-${Math.min(i + itemsPerDropdown, allProjects.length)}`
+      projectDropdowns.push({
+        label: label,
+        options: projectOptions,
+        blockId: `project_section_${dropdownNumber}`
+      })
+    }
     
     // Fallback if no projects
-    const projectOptions = projectDropdowns.length > 0 
-      ? projectDropdowns[0].options 
-      : [{ text: { type: 'plain_text', text: 'No projects available' }, value: 'none' }]
+    if (projectDropdowns.length === 0) {
+      projectDropdowns.push({
+        label: 'No Projects',
+        options: [{ text: { type: 'plain_text', text: 'No projects available' }, value: 'none' }],
+        blockId: 'project_section_1'
+      })
+    }
 
     const printerOptions = printers.status === 'fulfilled' && printers.value.length > 0
       ? printers.value.map(printer => ({
@@ -106,6 +142,31 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
           value: material
         }))
       : [{ text: { type: 'plain_text', text: 'No materials available' }, value: 'none' }]
+
+    // Validate trigger_id is still valid (Slack has a 3-second timeout)
+    if (!trigger_id || Date.now() - parseInt(trigger_id.split('.')[0]) > 3000) {
+      throw new Error('Trigger ID expired or invalid')
+    }
+
+    // Final validation: ensure no text field exceeds 75 characters
+    const validateTextLength = (text, fieldName) => {
+      if (text && text.length > 75) {
+        logger.error(`Text field ${fieldName} exceeds 75 characters`, { 
+          text, 
+          length: text.length 
+        })
+        return text.substring(0, 72) + '...'
+      }
+      return text
+    }
+
+    // Validate all dropdown options
+    projectDropdowns.forEach((dropdown, dropdownIndex) => {
+      dropdown.options.forEach((option, optionIndex) => {
+        option.text.text = validateTextLength(option.text.text, `dropdown_${dropdownIndex}_option_${optionIndex}_text`)
+        option.value = validateTextLength(option.value, `dropdown_${dropdownIndex}_option_${optionIndex}_value`)
+      })
+    })
 
     await client.views.open({
       trigger_id: trigger_id,
@@ -139,24 +200,26 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `*Select Project:*\n_All ${allProjects.length} projects organized by letter groups below._`
+              text: `*Select Project:*\n_All ${allProjects.length} projects organized in dropdowns below. Choose from any dropdown._`
             }
           },
-          ...projectDropdowns.map((group, index) => ({
+          ...projectDropdowns.map((dropdown, index) => ({
             type: 'section',
-            block_id: `project_section_${index}`,
+            block_id: dropdown.blockId,
             text: {
               type: 'mrkdwn',
-              text: `*Projects ${group.label}:*`
+              text: `*${dropdown.label}:*`
             },
             accessory: {
               type: 'static_select',
               action_id: 'select_project',
               placeholder: {
                 type: 'plain_text',
-                text: `Choose from ${group.label}...`
+                text: `Choose from ${dropdown.label}...`.length > 75 ? 
+                  `Choose from ${dropdown.label}...`.substring(0, 72) + '...' : 
+                  `Choose from ${dropdown.label}...`
               },
-              options: group.options
+              options: dropdown.options
             }
           })),
           {
@@ -354,9 +417,23 @@ app.command('/print', async ({ ack, payload, client, respond }) => {
     }
 
     // Show interactive modal for print request
-    await showPrintModal({ client, channel_id, user_id, trigger_id: payload.trigger_id })
-    
-    logger.info('Print modal shown', { channel_id, user_id })
+    try {
+      await showPrintModal({ client, channel_id, user_id, trigger_id: payload.trigger_id })
+      logger.info('Print modal shown', { channel_id, user_id })
+    } catch (modalError) {
+      logger.error('Failed to show print modal', { 
+        error: modalError.message, 
+        channel_id, 
+        user_id 
+      })
+      
+      // Fallback: show a simple message with instructions
+      await respond({
+        response_type: 'ephemeral',
+        text: `⚠️ Could not load the print form. Please try again in a moment.\n\nIf the problem persists, you can:\n• Upload your file directly and I'll process it\n• Use \`/print <file_id>\` with a Slack file ID\n• Contact an administrator`
+      })
+      return
+    }
   } catch (error) {
     logger.error('Print command failed', { 
       error: error.message, 
@@ -371,7 +448,9 @@ app.command('/print', async ({ ack, payload, client, respond }) => {
 })
 
 // File shared event handler
-app.event('file_shared', async ({ event, client }) => {
+app.event('file_shared', async ({ event, client, ack }) => {
+  await ack()
+  
   try {
     const fileId = event.file_id || event.file?.id
     if (!fileId) return
