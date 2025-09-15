@@ -50,8 +50,10 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
       googleService.getMaterials()
     ])
 
-    const projectOptions = projects.status === 'fulfilled' && projects.value.length > 0
-      ? projects.value.map(project => ({
+    // Limit projects to 100 most recent/important ones for Slack compatibility
+    const allProjects = projects.status === 'fulfilled' ? projects.value : []
+    const projectOptions = allProjects.length > 0
+      ? allProjects.slice(0, 100).map(project => ({
           text: { type: 'plain_text', text: project },
           value: project
         }))
@@ -104,7 +106,7 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
             block_id: 'project_section',
             text: {
               type: 'mrkdwn',
-              text: '*Select Project:*'
+              text: `*Select Project:*\n_Showing first 100 of ${allProjects.length} projects. If your project isn't listed, please contact an admin to add it to the Project Tracker sheet._`
             },
             accessory: {
               type: 'static_select',
