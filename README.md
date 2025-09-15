@@ -60,7 +60,7 @@ A secure, high-performance Slack bot that automatically uploads files to Google 
 |----------|-------------|----------|
 | `SLACK_BOT_TOKEN` | Slack bot token (xoxb-...) | ✅ |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret | ✅ |
-| `SHEET_ID` | Google Sheets ID | ✅ |
+| `SHEET_ID` | Google Sheets ID for submissions | ✅ |
 | `DRIVE_FOLDER_ID` | Google Drive folder ID (in Shared Drive) | ✅ |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to service account JSON | ✅ |
 | `PORT` | Server port (default: 3000) | ❌ |
@@ -81,6 +81,11 @@ A secure, high-performance Slack bot that automatically uploads files to Google 
    - Create a folder inside the Shared Drive
    - Share the folder with your service account email
    - Use the folder ID as `DRIVE_FOLDER_ID`
+
+5. **Set up Projects Sheet:**
+   - The bot uses a hardcoded projects sheet: `1DhPrekXEd0GG45SpNftVbjKeHg52Jwec-_rQ9qX3Bz0`
+   - Ensure your service account has access to this sheet
+   - Projects should be listed in column A of the "Project Tracker" tab
 
 ### Slack App Setup
 

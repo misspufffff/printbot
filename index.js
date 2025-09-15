@@ -40,6 +40,163 @@ const app = new App({
 const waiting = new Map()
 const keyFor = (channel, user) => `${channel}:${user}`
 
+// Show interactive print modal
+async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
+  try {
+    // Get projects, printers, and materials in parallel
+    const [projects, printers, materials] = await Promise.allSettled([
+      googleService.getProjects(),
+      googleService.getPrinters(),
+      googleService.getMaterials()
+    ])
+
+    const projectOptions = projects.status === 'fulfilled' && projects.value.length > 0
+      ? projects.value.map(project => ({
+          text: { type: 'plain_text', text: project },
+          value: project
+        }))
+      : [{ text: { type: 'plain_text', text: 'No projects available' }, value: 'none' }]
+
+    const printerOptions = printers.status === 'fulfilled' && printers.value.length > 0
+      ? printers.value.map(printer => ({
+          text: { type: 'plain_text', text: printer },
+          value: printer
+        }))
+      : [{ text: { type: 'plain_text', text: 'No printers available' }, value: 'none' }]
+
+    const materialOptions = materials.status === 'fulfilled' && materials.value.length > 0
+      ? materials.value.map(material => ({
+          text: { type: 'plain_text', text: material },
+          value: material
+        }))
+      : [{ text: { type: 'plain_text', text: 'No materials available' }, value: 'none' }]
+
+    await client.views.open({
+      trigger_id: trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'print_request_modal',
+        title: {
+          type: 'plain_text',
+          text: 'Print Request'
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Submit Print Request'
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancel'
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Please fill out the print request form below:'
+            }
+          },
+          {
+            type: 'divider'
+          },
+          {
+            type: 'section',
+            block_id: 'project_section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Select Project:*'
+            },
+            accessory: {
+              type: 'static_select',
+              action_id: 'select_project',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Choose a project...'
+              },
+              options: projectOptions
+            }
+          },
+          {
+            type: 'section',
+            block_id: 'printer_section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Select Printer:*'
+            },
+            accessory: {
+              type: 'static_select',
+              action_id: 'select_printer',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Choose a printer...'
+              },
+              options: printerOptions
+            }
+          },
+          {
+            type: 'section',
+            block_id: 'materials_section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Select Materials:*'
+            },
+            accessory: {
+              type: 'static_select',
+              action_id: 'select_materials',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Choose materials...'
+              },
+              options: materialOptions
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'notes_section',
+            element: {
+              type: 'plain_text_input',
+              action_id: 'add_notes',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Enter any notes about this print request...'
+              },
+              multiline: true
+            },
+            label: {
+              type: 'plain_text',
+              text: 'Add Notes (optional):'
+            },
+            optional: true
+          },
+          {
+            type: 'input',
+            block_id: 'file_section',
+            element: {
+              type: 'plain_text_input',
+              action_id: 'file_input',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Paste file URL or Slack file ID here...'
+              }
+            },
+            label: {
+              type: 'plain_text',
+              text: 'File URL or ID:'
+            }
+          }
+        ]
+      }
+    })
+  } catch (error) {
+    logger.error('Failed to show print modal', { 
+      error: error.message, 
+      channel_id, 
+      user_id 
+    })
+    throw error
+  }
+}
+
 // Health check endpoints
 receiver.router.get('/', (_req, res) => {
   res.status(200).json({ 
@@ -73,7 +230,11 @@ receiver.router.get('/health', async (_req, res) => {
 if (env.NODE_ENV === 'development') {
   receiver.router.get('/diag/sheets', async (_req, res) => {
     try {
-      await googleService.appendToSheet(['', new Date().toISOString(), 'diag-user', 'diag-file', '', ''])
+      // Format timestamp as MM/DD/YYYY for diagnostic test
+      const now = new Date()
+      const timestamp = `${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getDate().toString().padStart(2, '0')}/${now.getFullYear()}`
+      
+      await googleService.appendToSheet(['', timestamp, 'diag-user', 'diag-file', '', ''])
       res.status(200).json({ status: 'success', message: 'Sheets append OK' })
     } catch (error) {
       logger.error('Sheets diagnostic failed', { error: error.message })
@@ -91,6 +252,21 @@ if (env.NODE_ENV === 'development') {
       res.status(200).json({ status: 'success', fileId: file.id })
     } catch (error) {
       logger.error('Drive diagnostic failed', { error: error.message })
+      res.status(500).json({ status: 'error', message: error.message })
+    }
+  })
+
+  receiver.router.get('/diag/projects', async (_req, res) => {
+    try {
+      const projects = await googleService.getProjects()
+      res.status(200).json({ 
+        status: 'success', 
+        projects,
+        count: projects.length,
+        sheetId: '1DhPrekXEd0GG45SpNftVbjKeHg52Jwec-_rQ9qX3Bz0'
+      })
+    } catch (error) {
+      logger.error('Projects diagnostic failed', { error: error.message })
       res.status(500).json({ status: 'error', message: error.message })
     }
   })
@@ -121,18 +297,10 @@ app.command('/print', async ({ ack, payload, client, respond }) => {
       return
     }
 
-    // Otherwise wait 2 minutes for their next file in this channel
-    const key = keyFor(channel_id, user_id)
-    const expiresAt = Date.now() + 2 * 60 * 1000
+    // Show interactive modal for print request
+    await showPrintModal({ client, channel_id, user_id, trigger_id: payload.trigger_id })
     
-    waiting.set(key, { expiresAt, respond })
-    
-    await respond({
-      response_type: 'ephemeral',
-      text: 'Okay — upload a file in this channel within the next 2 minutes and I\'ll send it to Drive + log it in Sheets.',
-    })
-    
-    logger.info('User added to waitlist', { channel_id, user_id, expiresAt })
+    logger.info('Print modal shown', { channel_id, user_id })
   } catch (error) {
     logger.error('Print command failed', { 
       error: error.message, 
@@ -202,6 +370,286 @@ app.event('file_shared', async ({ event, client }) => {
   }
 })
 
+// Handle project selection (for form updates)
+app.action('select_project', async ({ ack, body, client, respond }) => {
+  await ack()
+  // This is handled by the form submission, no immediate response needed
+})
+
+// Handle notes input (for form updates)
+app.action('add_notes', async ({ ack, body, client, respond }) => {
+  await ack()
+  // This is handled by the form submission, no immediate response needed
+})
+
+// Handle form submission
+app.action('submit_file_log', async ({ ack, body, client, respond }) => {
+  await ack()
+  
+  try {
+    const fileId = body.actions[0].value
+    const fileData = global.pendingFiles?.get(fileId)
+    
+    if (!fileData) {
+      await respond({
+        response_type: 'ephemeral',
+        text: '❌ File data expired. Please upload the file again.'
+      })
+      return
+    }
+    
+    // Get form values from the view state
+    const projectSelection = body.view?.state?.values?.project_section?.select_project?.selected_option?.value
+    const notes = body.view?.state?.values?.notes_section?.add_notes?.value || ''
+    
+    if (!projectSelection) {
+      await respond({
+        response_type: 'ephemeral',
+        text: '❌ Please select a project before submitting.'
+      })
+      return
+    }
+    
+    logger.info('File log submission received', { 
+      fileId,
+      project: projectSelection,
+      hasNotes: !!notes,
+      user: body.user.id 
+    })
+    
+    // Format timestamp as MM/DD/YYYY
+    const now = new Date()
+    const timestamp = `${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getDate().toString().padStart(2, '0')}/${now.getFullYear()}`
+    
+    // Append to sheet
+    const sheetResponse = await googleService.appendToSheet([
+      '', // Order (auto via sheet)
+      timestamp, // Timestamp (MM/DD/YYYY)
+      fileData.userName, // User
+      fileData.file.name || 'unknown', // File Name
+      projectSelection, // Project Name
+      fileData.driveFile.webViewLink || `https://drive.google.com/file/d/${fileData.driveFile.id}/view`, // Drive Link
+      notes // Notes
+    ])
+    
+    // Clean up stored data
+    global.pendingFiles?.delete(fileId)
+    
+    await respond({
+      response_type: 'ephemeral',
+      text: `✅ File logged successfully!\n• Project: *${projectSelection}*\n• Notes: ${notes || 'None'}\n• Drive: ${fileData.driveFile.webViewLink || `https://drive.google.com/file/d/${fileData.driveFile.id}/view`}`
+    })
+    
+  } catch (error) {
+    logger.error('File log submission failed', { 
+      error: error.message, 
+      user: body.user.id 
+    })
+    await respond({
+      response_type: 'ephemeral',
+      text: `❌ Error logging file: ${error.message}`
+    })
+  }
+})
+
+// Handle form cancellation
+app.action('cancel_file_log', async ({ ack, body, client, respond }) => {
+  await ack()
+  
+  try {
+    const fileId = body.actions[0].value
+    global.pendingFiles?.delete(fileId)
+    
+    await respond({
+      response_type: 'ephemeral',
+      text: '❌ File logging cancelled.'
+    })
+  } catch (error) {
+    logger.error('File log cancellation failed', { 
+      error: error.message, 
+      user: body.user.id 
+    })
+  }
+})
+
+// Handle print request modal submission
+app.view('print_request_modal', async ({ ack, body, client, view }) => {
+  await ack()
+  
+  try {
+    const values = view.state.values
+    const user_id = body.user.id
+    
+    // Extract form values
+    const project = values.project_section?.select_project?.selected_option?.value
+    const printer = values.printer_section?.select_printer?.selected_option?.value
+    const materials = values.materials_section?.select_materials?.selected_option?.value
+    const notes = values.notes_section?.add_notes?.value || ''
+    const fileInput = values.file_section?.file_input?.value || ''
+    
+    logger.info('Print request modal submitted', { 
+      user_id,
+      project,
+      printer,
+      materials,
+      hasNotes: !!notes,
+      hasFileInput: !!fileInput
+    })
+    
+    // Validate required fields
+    if (!project || project === 'none') {
+      await client.chat.postEphemeral({
+        channel: body.user.id,
+        user: body.user.id,
+        text: '❌ Please select a project before submitting.'
+      })
+      return
+    }
+    
+    if (!fileInput.trim()) {
+      await client.chat.postEphemeral({
+        channel: body.user.id,
+        user: body.user.id,
+        text: '❌ Please provide a file URL or Slack file ID.'
+      })
+      return
+    }
+    
+    // Process the file
+    await client.chat.postEphemeral({
+      channel: body.user.id,
+      user: body.user.id,
+      text: 'Processing your print request...'
+    })
+    
+    try {
+      const file = await slackService.processFileInput(client, fileInput.trim())
+      await processPrintRequest({ 
+        client, 
+        file, 
+        user_id, 
+        project, 
+        printer, 
+        materials, 
+        notes 
+      })
+    } catch (fileError) {
+      logger.error('File processing failed in modal', { 
+        error: fileError.message, 
+        user_id, 
+        fileInput 
+      })
+      await client.chat.postEphemeral({
+        channel: body.user.id,
+        user: body.user.id,
+        text: `❌ Could not process file: ${fileError.message}`
+      })
+    }
+    
+  } catch (error) {
+    logger.error('Print request modal submission failed', { 
+      error: error.message, 
+      user: body.user.id 
+    })
+    await client.chat.postEphemeral({
+      channel: body.user.id,
+      user: body.user.id,
+      text: `❌ Error processing print request: ${error.message}`
+    })
+  }
+})
+
+// Process print request with all form data
+async function processPrintRequest({ client, file, user_id, project, printer, materials, notes }) {
+  const startTime = Date.now()
+  
+  try {
+    // 1) Download from Slack
+    logger.info('Starting print request processing', { 
+      filename: file.name, 
+      mimetype: file.mimetype,
+      user_id,
+      project,
+      printer,
+      materials
+    })
+    
+    const data = await slackService.downloadFile(file)
+    logger.info('File downloaded for print request', { 
+      filename: file.name, 
+      size: data.length,
+      downloadTime: Date.now() - startTime
+    })
+
+    // 2) Upload to Google Drive
+    const driveStartTime = Date.now()
+    const driveFile = await googleService.uploadToDrive(
+      data, 
+      file.name || `upload-${Date.now()}`, 
+      file.mimetype || 'application/octet-stream'
+    )
+    logger.info('File uploaded to Drive for print request', { 
+      fileId: driveFile.id, 
+      uploadTime: Date.now() - driveStartTime
+    })
+
+    // 3) Get user info
+    const userInfo = await slackService.getUserInfo(client, user_id)
+    const userName = userInfo?.real_name || userInfo?.name || user_id
+
+    // 4) Log to sheet with all print request data
+    const now = new Date()
+    const timestamp = `${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getDate().toString().padStart(2, '0')}/${now.getFullYear()}`
+    
+    const sheetResponse = await googleService.appendToSheet([
+      '', // Order (auto via sheet)
+      timestamp, // Timestamp (MM/DD/YYYY)
+      userName, // User
+      file.name || 'unknown', // File Name
+      project, // Project Name
+      driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`, // Drive Link
+      notes, // Notes
+      printer, // Printer
+      materials // Materials
+    ])
+    
+    const totalTime = Date.now() - startTime
+    
+    logger.info('Print request processing completed successfully', {
+      filename: file.name,
+      totalTime,
+      user_id,
+      project,
+      printer,
+      materials
+    })
+
+    // 5) Send success response
+    await client.chat.postEphemeral({
+      channel: user_id,
+      user: user_id,
+      text: `✅ Print request submitted successfully!\n\n*Details:*\n• Project: *${project}*\n• Printer: *${printer}*\n• Materials: *${materials}*\n• File: *${file.name}*\n• Drive: ${driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`}\n• Notes: ${notes || 'None'}\n• Processing time: ${totalTime}ms`
+    })
+
+  } catch (error) {
+    logger.error('Print request processing failed', {
+      error: error.message,
+      filename: file.name,
+      user_id,
+      project,
+      printer,
+      materials,
+      processingTime: Date.now() - startTime
+    })
+
+    await client.chat.postEphemeral({
+      channel: user_id,
+      user: user_id,
+      text: `❌ Print request failed: ${error.message}`,
+    })
+  }
+}
+
 // Core file processing function
 async function processFile({ client, file, channel_id, user_id, respond }) {
   const startTime = Date.now()
@@ -248,29 +696,132 @@ async function processFile({ client, file, channel_id, user_id, respond }) {
       ? slackPermalink.value 
       : ''
 
-    // 4) Append to Google Sheet
-    const sheetStartTime = Date.now()
-    const driveLink = driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`
-    
-    await googleService.appendToSheet([
-      '', // Order (auto via sheet)
-      new Date().toISOString(), // Timestamp
-      userName, // User
-      file.name || 'unknown', // File Name
-      permalink, // Slack Link
-      driveLink // Drive Link
-    ])
-    
-    logger.info('Data logged to sheet', { 
-      sheetTime: Date.now() - sheetStartTime
-    })
-
-    // 5) Success response
+    // 4) Get projects for interactive prompt
     const totalTime = Date.now() - startTime
-    await respond({
-      response_type: 'ephemeral',
-      text: `✅ Uploaded *${file.name}* to Drive and logged it in the sheet.\n• Drive: ${driveLink}\n• Processing time: ${totalTime}ms`,
+    
+    logger.info('Attempting to fetch projects for interactive prompt', { 
+      sheetId: '1DhPrekXEd0GG45SpNftVbjKeHg52Jwec-_rQ9qX3Bz0'
     })
+    
+    const projects = await googleService.getProjects()
+    
+    logger.info('Projects fetched for interactive prompt', { 
+      count: projects.length,
+      projects: projects.slice(0, 5) // Log first 5 projects for debugging
+    })
+    
+    if (projects.length > 0) {
+      // Create project selection dropdown
+      const projectOptions = projects.map(project => ({
+        text: {
+          type: 'plain_text',
+          text: project
+        },
+        value: project
+      }))
+      
+      // Store file info for later processing
+      const fileData = {
+        file,
+        driveFile,
+        userName,
+        channel_id,
+        user_id,
+        startTime
+      }
+      
+      // Store the file data temporarily (you might want to use a database in production)
+      global.pendingFiles = global.pendingFiles || new Map()
+      const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      global.pendingFiles.set(fileId, fileData)
+      
+      // Set expiration (5 minutes)
+      setTimeout(() => {
+        global.pendingFiles?.delete(fileId)
+      }, 5 * 60 * 1000)
+      
+      await respond({
+        response_type: 'ephemeral',
+        text: `✅ Uploaded *${file.name}* to Drive!\n• Drive: ${driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`}\n• Processing time: ${totalTime}ms\n\nPlease complete the form below to log this file:`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `✅ Uploaded *${file.name}* to Drive!\n• Drive: ${driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`}\n• Processing time: ${totalTime}ms\n\nPlease complete the form below to log this file:`
+            }
+          },
+          {
+            type: 'divider'
+          },
+          {
+            type: 'section',
+            block_id: 'project_section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Select Project:*'
+            },
+            accessory: {
+              type: 'static_select',
+              action_id: 'select_project',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Choose a project...'
+              },
+              options: projectOptions
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'notes_section',
+            element: {
+              type: 'plain_text_input',
+              action_id: 'add_notes',
+              placeholder: {
+                type: 'plain_text',
+                text: 'Enter any notes about this file...'
+              },
+              multiline: true
+            },
+            label: {
+              type: 'plain_text',
+              text: 'Add Notes (optional):'
+            },
+            optional: true
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Submit to Log'
+                },
+                style: 'primary',
+                action_id: 'submit_file_log',
+                value: fileId
+              },
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Cancel'
+                },
+                action_id: 'cancel_file_log',
+                value: fileId
+              }
+            ]
+          }
+        ]
+      })
+    } else {
+      // Fallback if no projects
+      await respond({
+        response_type: 'ephemeral',
+        text: `✅ Uploaded *${file.name}* to Drive!\n• Drive: ${driveFile.webViewLink || `https://drive.google.com/file/d/${driveFile.id}/view`}\n• Processing time: ${totalTime}ms\n\n⚠️ Could not load project list. Please update the project manually in the sheet.`,
+      })
+    }
 
     logger.info('File processing completed successfully', {
       filename: file.name,

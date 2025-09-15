@@ -5,6 +5,7 @@ export const envSchema = Joi.object({
   SLACK_BOT_TOKEN: Joi.string().pattern(/^xoxb-/).required(),
   SLACK_SIGNING_SECRET: Joi.string().min(1).required(),
   SHEET_ID: Joi.string().min(1).required(),
+  PROJECT_SHEET: Joi.string().min(1).optional(),
   DRIVE_FOLDER_ID: Joi.string().min(1).required(),
   // Google authentication - either JSON env var or file path
   GOOGLE_CREDENTIALS_JSON: Joi.string().min(1).optional(),
