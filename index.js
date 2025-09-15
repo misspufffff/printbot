@@ -12,11 +12,20 @@ import googleService from './services/googleService.js'
 import slackService from './services/slackService.js'
 
 // Validate environment variables
+console.log('🔍 Validating environment variables...')
 const { error, value: env } = envSchema.validate(process.env)
 if (error) {
-  logger.error('Environment validation failed', { error: error.details })
+  console.error('❌ Environment validation failed:')
+  console.error(JSON.stringify(error.details, null, 2))
+  console.error('\nRequired environment variables:')
+  console.error('- SLACK_BOT_TOKEN (starts with xoxb-)')
+  console.error('- SLACK_SIGNING_SECRET')
+  console.error('- SHEET_ID')
+  console.error('- DRIVE_FOLDER_ID')
+  console.error('- GOOGLE_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS')
   process.exit(1)
 }
+console.log('✅ Environment validation passed')
 
 // Initialize Express receiver with security middleware
 const receiver = new ExpressReceiver({
@@ -30,7 +39,7 @@ receiver.router.use(compression())
 receiver.router.use(...securityMiddleware)
 
 // Trust proxy for rate limiting (fixes X-Forwarded-For header error)
-receiver.router.set('trust proxy', true)
+receiver.app.set('trust proxy', true)
 
 // Initialize Slack app
 const app = new App({
@@ -1189,17 +1198,26 @@ process.on('SIGINT', () => {
 
 // Start server
 const port = env.PORT
+console.log(`🚀 Starting server on port ${port}...`)
 ;(async () => {
   try {
+    console.log('🔧 Initializing Slack app...')
     await app.start(port)
+    console.log(`✅ Slack /print bot listening on port ${port}`)
     logger.info(`🚀 Slack /print bot listening on port ${port}`)
     
+    console.log('🔍 Testing Google services connection...')
     // Test Google services connection
     const googleHealthy = await googleService.testConnection()
     if (!googleHealthy) {
+      console.warn('⚠️ Google services connection test failed - some features may not work')
       logger.warn('Google services connection test failed - some features may not work')
+    } else {
+      console.log('✅ Google services connection successful')
     }
   } catch (error) {
+    console.error('❌ Failed to start server:', error.message)
+    console.error('Stack trace:', error.stack)
     logger.error('Failed to start server', { error: error.message })
     process.exit(1)
   }
