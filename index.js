@@ -50,13 +50,47 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
       googleService.getMaterials()
     ])
 
-    // Limit projects to 100 most recent/important ones for Slack compatibility
+    // Organize projects by first letter for better organization
     const allProjects = projects.status === 'fulfilled' ? projects.value : []
-    const projectOptions = allProjects.length > 0
-      ? allProjects.slice(0, 100).map(project => ({
+    
+    // Group projects by first letter
+    const projectsByLetter = {}
+    allProjects.forEach(project => {
+      const firstLetter = project.charAt(0).toUpperCase()
+      if (!projectsByLetter[firstLetter]) {
+        projectsByLetter[firstLetter] = []
+      }
+      projectsByLetter[firstLetter].push(project)
+    })
+    
+    // Create letter groups (A-F, G-M, N-S, T-Z) to fit within 100 items per group
+    const letterGroups = [
+      { letters: ['A', 'B', 'C', 'D', 'E', 'F'], label: 'A-F' },
+      { letters: ['G', 'H', 'I', 'J', 'K', 'L', 'M'], label: 'G-M' },
+      { letters: ['N', 'O', 'P', 'Q', 'R', 'S'], label: 'N-S' },
+      { letters: ['T', 'U', 'V', 'W', 'X', 'Y', 'Z'], label: 'T-Z' }
+    ]
+    
+    const projectDropdowns = letterGroups.map(group => {
+      const groupProjects = []
+      group.letters.forEach(letter => {
+        if (projectsByLetter[letter]) {
+          groupProjects.push(...projectsByLetter[letter])
+        }
+      })
+      
+      return {
+        label: group.label,
+        options: groupProjects.slice(0, 100).map(project => ({
           text: { type: 'plain_text', text: project },
           value: project
         }))
+      }
+    }).filter(group => group.options.length > 0)
+    
+    // Fallback if no projects
+    const projectOptions = projectDropdowns.length > 0 
+      ? projectDropdowns[0].options 
       : [{ text: { type: 'plain_text', text: 'No projects available' }, value: 'none' }]
 
     const printerOptions = printers.status === 'fulfilled' && printers.value.length > 0
@@ -103,21 +137,28 @@ async function showPrintModal({ client, channel_id, user_id, trigger_id }) {
           },
           {
             type: 'section',
-            block_id: 'project_section',
             text: {
               type: 'mrkdwn',
-              text: `*Select Project:*\n_Showing first 100 of ${allProjects.length} projects. If your project isn't listed, please contact an admin to add it to the Project Tracker sheet._`
+              text: `*Select Project:*\n_All ${allProjects.length} projects organized by letter groups below._`
+            }
+          },
+          ...projectDropdowns.map((group, index) => ({
+            type: 'section',
+            block_id: `project_section_${index}`,
+            text: {
+              type: 'mrkdwn',
+              text: `*Projects ${group.label}:*`
             },
             accessory: {
               type: 'static_select',
               action_id: 'select_project',
               placeholder: {
                 type: 'plain_text',
-                text: 'Choose a project...'
+                text: `Choose from ${group.label}...`
               },
-              options: projectOptions
+              options: group.options
             }
-          },
+          })),
           {
             type: 'section',
             block_id: 'printer_section',
@@ -539,8 +580,15 @@ app.view('print_request_modal', async ({ ack, body, client, view }) => {
     const values = view.state.values
     const user_id = body.user.id
     
-    // Extract form values
-    const project = values.project_section?.select_project?.selected_option?.value
+    // Extract form values - check all project sections
+    let project = null
+    for (const [key, value] of Object.entries(values)) {
+      if (key.startsWith('project_section_') && value?.select_project?.selected_option?.value) {
+        project = value.select_project.selected_option.value
+        break
+      }
+    }
+    
     const printer = values.printer_section?.select_printer?.selected_option?.value
     const materials = values.materials_section?.select_materials?.selected_option?.value
     const notes = values.notes_section?.add_notes?.value || ''
